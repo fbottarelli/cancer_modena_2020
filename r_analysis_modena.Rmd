@@ -1,0 +1,213 @@
+---
+title: "analisys_modena_cancer"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+Rmarkdwons settings
+```{r setup, include=FALSE}
+rm(list = ls()) # reset previous data in memory
+knitr::opts_chunk$set(echo = TRUE)
+
+
+# dummy creation function
+make.dummy=function(n, freq=12, start=1){
+dv=matrix(0,nrow=(n+start-1), ncol=freq)
+for (i in 1:freq)
+dv[,i][seq(i,n+start-1,freq)] = 1
+return(dv[start:(n+start-1),])
+}
+```
+
+Loading the dataset of month incidence 
+```{r, echo=FALSE}
+library(MASS)
+library(ggplot2)
+load("~/Dropbox/Vault/Modena_dati/analisi_r/dati_modena.RData")
+```
+
+Exploratory data analysis:
+```{r, warning=FALSE}
+# lettura dei dati come una serie storiche, specificando il periodo di tempo
+ts_tot = ts(dati_all$conteggio,start = c(2018,7), end=c(2021,6), frequency = 12) 
+time=seq(as.Date("2018-7-1"), as.Date("2021-6-1"), by = "months")
+df_tot = as.data.frame(ts_tot)
+# Generazione del grafico
+ggplot(df_tot, aes(time)) + # plot dei dati, linea per delineare lo scoppio della pandemia
+  ggtitle("Diagnostic cancer by month, from July 2018 to June 2021, 
+          in Modena diagnostic structure") +
+  geom_line(aes(y = ts_tot)) +
+  geom_vline(xintercept = as.numeric(time[20]), color="red") + # barra rossa verticale
+  xlab("data") +
+  ylab("Number of unique cancer diagnostic (no skin cancer)")
+```
+Dataframe of 12 months before and 12 anfter the covid pandemic
+```{r}
+# 12 months dataser
+# horizontal datafrmae 
+pre = dati_all$conteggio[8:19]
+post = dati_all$conteggio[20:31]
+# two columns, one before and one after covid
+df_1920_12 = as.data.frame(t(rbind(pre,post))) 
+colnames(df_1920_12) = c("before","after") # columns names
+#### Vertical Dataframae
+df_1920v_12 = as.data.frame(matrix(data=c(df_1920_12[,1],df_1920_12[,2],rep(0,12),rep(1,12)),
+                                   nrow = 24,ncol = 2, byrow =F))
+colnames(df_1920v_12) =c("conteggio","periodo")
+df_1920v_12$periodo = as.factor(df_1920v_12$periodo)
+```
+
+Second dataframe with 5 months and the correspondent 5 months in 2020 and 2019 (pre-covid)
+```{r}
+# last 5 month
+# horizontal datafrmae 
+pre = dati_all$conteggio[8:12]
+post = dati_all$conteggio[20:24]
+post2 = dati_all$conteggio[32:36]
+
+df_1920_5 = as.data.frame(t(rbind(pre,post,post2))) 
+colnames(df_1920_5) = c("before","after","last5") # columns names
+#### Vertical dataframe
+df_1920v_5 = as.data.frame(matrix(data=c(pre,post,post2,rep(0,5),rep(1,5),rep(2,5)),
+                                   nrow = 15,ncol = 3, byrow =F))
+colnames(df_1920v_5) =c("conteggio","periodo") # columns names
+df_1920v_5$periodo = as.factor(df_1920v_5$periodo)
+
+```
+
+Plot 2 - 12 months comparasion
+```{r}
+time_mesi=seq(as.Date("2019-2-1"), as.Date("2020-1-1"), by = "months")
+ggplot(df_1920_12, aes(time_mesi)) + 
+  ggtitle("Cancer diagnosticated, between febrauary 2019 
+          and march 2020 compared with count from february 2020 and january 2021") +
+  geom_line(aes(y = before, colour = "year 19/20")) + 
+  geom_line(aes(y = after, colour = "year 20/21")) +
+  xlab("month") +
+  ylab("Diagnosticated cancer") +
+  scale_x_date(breaks = '1 month',
+               date_labels = "%b") +
+  theme(plot.title = element_text(size = 11))
+```
+
+Plot 3 - Boxplot comparasion 
+```{r}
+ggplot(df_1920v_12, aes(x=periodo,y=conteggio,fill=periodo)) + # boxplot dei 12 mesi pre covid - ROSSO
+         geom_boxplot(outlier.colour = "red",) +
+         ggtitle("Cancer diagnosticated, between febrauary 2019 
+          and march 2020 compared with count from february 2020 and january 2021") +
+         xlab("Period of time") +
+         ylab("Diagnosticated cancer") +
+         theme(plot.title = element_text(size = 11))
+```
+
+Mean difference observed
+```{r}
+n1_12 = sum(df_1920_12$before);n1_12 # numerosità nei 12 mesi prima
+n2_12 = sum(df_1920_12$after);n2_12 # numerosità nei 12 mesi after
+
+1-(n2_12/n1_12) # rapporto che denota un calo del 16.7%
+```
+
+## Data distribution analysis
+```{r}
+hist(df_1920v_12[,1],breaks = 8)
+
+# Kernel Density Plot
+d <- density(df_1920v_12$conteggio) # returns the density data
+plot(d) # plots the results 
+
+qqnorm(df_1920v_12$conteggio, pch = 1, frame = FALSE)
+qqline(df_1920v_12$conteggio, col = "steelblue", lwd = 2)
+
+# qqplot(df_1920v$conteggio)
+shapiro.test(df_1920v_12$conteggio)
+shapiro.test(df_1920_12$before)
+shapiro.test(df_1920_12$after)
+```
+Normality can be assumed but the nature of the data and the dimension of the sample suggest the try  a distribution for positive counting data like Poisson or Negative Binomial.
+
+In our case Poisson can't be used because the variance is much bigger compared to the mean of the distribution. (violation of one of the assumption for the Poisson distribution)
+
+Checking mean and variance difference
+```{r}
+mean(df_1920_12$before)
+mean(df_1920_12$after)
+
+var(df_1920_12)
+```
+
+
+# Test for equal variance in both the sample
+```{r}
+bartlett.test(df_1920v_12$conteggio~df_1920v_12$periodo)
+```
+
+Confirmed the equal variance.
+
+
+Now watch the autocorrelation function and partial autocorrelation function for check the independence assumption of our observation. 
+```{r, fig.height=6, fig.width= 7}
+par(mfrow=c(2,2)) # 2 disegni in un riquadro
+
+plt_ts_1 = acf(ts(df_1920_12[,1]), plot=F) 
+plot(plt_ts_1, main="Pre-Covid")
+plt_ts_2 = acf(ts(df_1920_12[,2]), plot=F) 
+plot(plt_ts_2, main="Post-Covid")
+
+plt_ts_1 = pacf(ts(df_1920_12[,1]), plot=F) 
+plot(plt_ts_1, main="Pre-Covid")
+plt_ts_2 = pacf(ts(df_1920_12[,2]), plot=F) 
+plot(plt_ts_2, main="Post-Covid")
+```
+
+No big signal of correlation between observation in different times, we know about august seasonality.
+
+
+
+Dummy variables for model the strong seasonality of august 
+```{r}
+# dummy 
+dm=make.dummy(length(df_1920v_12[,1]),start=2, freq=12)
+# dm[1:6,]
+# give names to the dummies
+nomi=c("dm4","dm5","dm6","dm7","dm8","dm9","dm10","dm11","dm12","dm1","dm2","dm3")
+dimnames(dm)=list(NULL,nomi)
+colnames(dm)<-nomi
+```
+
+
+Linear model with normal assumption, t-test and Wilconox-Mann test
+```{r}
+# 12 month
+# Linear model
+summary(lm(df_1920v_12$conteggio~df_1920v_12$periodo+dm[,8]))
+# T test:
+t.test(df_1920v_12$conteggio~df_1920v_12$periodo, var.equal =T)
+# Wilcoxon-Mann-Whitney test:
+wilcox.test(df_1920v_12$conteggio~df_1920v_12$periodo)
+```
+
+Test with negative binomial assumption for overdispersed counting data
+```{r}
+# 12 month
+bn_covid = glm.nb(df_1920v_12$conteggio~df_1920v_12$periodo+dm[,8])
+summary(bn_covid)
+# percentage difference after covid can be calculated with 1-exp(-0.18359)
+1-exp(-0.18359)
+```
+
+Check for correct assumption of Negative binomial instead of Poisson
+```{r}
+poi_covid <- glm(df_1920v_12$conteggio ~ df_1920v_12$periodo, family = "poisson")
+pchisq(2 * (logLik(bn_covid) - logLik(poi_covid)), df = 1, lower.tail = FALSE)
+```
+confirm the correct assumption of negative binomial instead of Poisson.
+
+
+Both models confirm the mean difference between the two sample.
+Same conclusion.
+
+
+
