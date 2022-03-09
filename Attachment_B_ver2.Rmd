@@ -1,0 +1,232 @@
+---
+title: "Attachment B"
+output:
+  pdf_document: default
+  html_document: default
+---
+## Attachment B
+
+Statistical analysis about tumours counting data comparasion of 12 months before COVID and 12 months after, in Modena province.
+
+```{r setup, include=FALSE}
+rm(list = ls()) # delete previous data in memory
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyquery)
+library(ggplot2)
+library(MASS)
+
+
+# Function for creating dummy variables
+make.dummy=function(n, freq=12, start=1){
+dv=matrix(0,nrow=(n+start-1), ncol=freq)
+for (i in 1:freq)
+dv[,i][seq(i,n+start-1,freq)] = 1
+return(dv[start:(n+start-1),])
+}
+```
+
+### Import of the datasets
+```{r}
+df_pre <- read.csv("df_pre.csv")
+df_post <- read.csv("df_post.csv")
+```
+
+#### horizontal monthly dataframe
+```{r}
+df_pre = query(
+" SELECT *
+  FROM df_pre
+  ORDER BY Year, Month;"
+)
+df_pre_m = query(
+" SELECT Month,Year, COUNT(*)
+  FROM df_pre
+  GROUP BY Year,Month;"
+)
+
+df_post = query(
+" SELECT *
+  FROM df_post
+  ORDER BY Year, Month;"
+)
+df_post_m = query(
+" SELECT Month,Year, COUNT(*)
+  FROM df_post
+  GROUP BY Year,Month;"
+)
+
+df_h = as.data.frame(cbind(df_pre_m[,3],df_post_m[,3]))
+colnames(df_h) = c("before","after") # columns names
+
+
+
+```
+
+#### from horizontal to vertical monthly dataframe
+```{r}
+#### Vertical Dataframe
+df_v = as.data.frame(matrix(data=c(df_h[,1],df_h[,2],rep(0,12),rep(1,12)),
+                                   nrow = 24,ncol = 2, byrow =F))
+colnames(df_v) =c("count","covid")
+df_v$covid = as.factor(df_v$covid)
+```
+
+### Plot of comparasion of the two years of observations
+```{r}
+time_mesi=seq(as.Date("2019-2-1"), as.Date("2020-1-1"), by = "months")
+ggplot(df_h, aes(time_mesi)) + 
+  geom_line(aes(y = before, colour = "pre-Covid")) + 
+  geom_line(aes(y = after, colour = "post-Covid")) +
+  xlab("month") +
+  ylab("Number of cases") +
+  scale_x_date(breaks = '1 month',
+               date_labels = "%b") +
+  theme(plot.title = element_text(size = 11))
+```
+
+### Boxplot of the two periods
+```{r}
+ggplot(df_v, aes(x=covid,y=count,fill=covid)) + # boxplot dei 12 mesi pre covid - ROSSO
+         geom_boxplot(outlier.colour = "red",) +
+         ylab("Number of cases") +
+         theme(plot.title = element_text(size = 11))
+```
+
+Noticeable difference in mean, the outlier that is seen in the boxplot for 2019/20 corresponds to the observation of August 
+
+
+Total case in the two periods
+```{r}
+sum(df_h$before)
+sum(df_h$after)
+```
+
+
+### Data distribution analysis
+```{r}
+hist(df_v[,1],breaks = 8)
+
+# Kernel Density Plot
+d <- density(df_v$count) # returns the density data
+plot(d) # plots the results 
+
+qqnorm(df_v$count, pch = 1, frame = FALSE)
+qqline(df_v$count, col = "steelblue", lwd = 2)
+
+# qqplot(df_1920v$conteggio)
+shapiro.test(df_v$count)
+shapiro.test(df_h$before)
+shapiro.test(df_h$after)
+
+# Test for equal variance in both the sample
+
+bartlett.test(df_v$count~df_v$covid)
+```
+
+There is empirical evidence about violation of normality, the nature of the data, the dimension of the sample and the previous graphics analytics suggest to consider a distribution for positive counting data like Poisson or Negative Binomial.
+
+In our case Poisson can't be used because the variance is much bigger compared to the mean of the distribution. (violation of one of the assumption for the Poisson distribution)
+
+Checking mean and variance difference
+```{r}
+mean(df_h$before)
+mean(df_h$after)
+
+var(df_h$before)
+var(df_h$after)
+```
+
+
+###### Dummy variables
+Dummy variables for model the strong seasonality of august 
+```{r}
+# dummy 
+dm=make.dummy(length(df_v[,1]),start=2, freq=12)
+# dm[1:6,]
+# give names to the dummies
+nomi=c("dm4","dm5","dm6","dm7","dm8","dm9","dm10","dm11","dm12","dm1","dm2","dm3")
+dimnames(dm)=list(NULL,nomi)
+colnames(dm)<-nomi
+```
+
+### Test for difference between periods
+Linear model with normal assumption, t-test and Wilconox-Mann test
+```{r}
+# 12 month
+# Linear model
+summary(lm(df_v$count~df_v$covid+dm[,8]))
+
+# T test:
+t.test(df_v$count~df_v$covid, var.equal =T)
+
+# Wilcoxon-Mann-Whitney test:
+wilcox.test(df_v$count~df_v$covid)
+```
+The diminution of response correlated with Covid months is highly significant (p-value < 0.001) in all above test.
+
+
+Test with negative binomial regression model for overdispersed counting data
+```{r}
+# 12 month
+bn_covid = glm.nb(df_v$count~df_v$covid+dm[,8]) # negative binomial regression model
+summary(bn_covid)
+```
+
+Same conclusion, the coefficient Covid is highly significant (p-value < 0.0001), the months during the Covid pandemic shows a significant diminution of the diagnosticated tumours.
+
+
+### Intepretation of the model parameter Covid
+```{r}
+# percentage difference after covid can be calculated with
+perce= (1-exp(-0.16404))*100
+```
+15.129% is the percentage difference between the two periods correlated with the change of period between pre and post Covid periods.
+
+### Confidence interval for the model parameter Covid
+Profile Confidence interval and diminution in percentage correlated with the pandemic period
+```{r}
+# "profile" confidence interval with 95% confidence for the Covid parameter
+bn_CI = c( (1-exp(confint(bn_covid)[2,1]))*100 , (1-exp(confint(bn_covid)[2,2]))*100); bn_CI
+```
+
+The months during the Covid pandemic shows a significant diminution of the diagnosticated tumours between 8.74% and 21.06% with a confidence of 95%
+
+**Both models confirm the mean difference between the two sample.
+Same conclusion.**
+
+
+Check for correct assumption of Negative binomial model instead of Poisson model.
+```{r}
+# comparison between poisson and negative binomial regression with log-likelihood, possible because Negative binomial can be viewed like a more generalized version of the Poisson.
+poi_covid <- glm(df_v$count ~ df_v$covid, family = "poisson")
+pchisq(2 * (logLik(bn_covid) - logLik(poi_covid)), df = 1, lower.tail = FALSE)
+```
+the p-value $\approx 0$ confirm the correct assumption of negative binomial instead of Poisson. (presence of overdispersion in the data)
+
+
+
+
+
+
+
+### Estimation of lost cases nationally
+Assuming a percentage decrease due to the Covid equal among all health structures equal to that observed in ours, using the national incidence to estimate the total cases from which to calculate the decrease of 15,13% in the months during the Covid period, recorded in Modena. This is a very strong assumption and the estimated case data must be taken with caution, but it could correspond to reality.
+```{r}
+NUMBER_CANCERS_ITALY_2020_F = 181857
+NUMBER_CANCERS_ITALY_2020_M = 194754
+total_c=NUMBER_CANCERS_ITALY_2020_F+NUMBER_CANCERS_ITALY_2020_M
+
+lost_cases = (total_c/100*perce);lost_cases
+
+# confidence interval prediction
+c( (total_c/100*bn_CI[1]), (total_c/100*bn_CI[2]))
+
+
+```
+
+Estimated lost cases: 56978
+
+From 32927 to 79347 lost cases with a "profile" confidence interval.
+
+
+
